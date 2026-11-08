@@ -70,11 +70,13 @@ wheelchair-ramp-project/
 
 각 기능은 별도 브랜치에서 개발하고 Pull Request를 통해 main에 병합한다.
 
+
 ## 7. 개발 진행 상황
 
 - [x] GitHub 저장소 생성 및 SourceTree 연결
-- [ ] 프로젝트 폴더 구조 구성
-- [ ] Python 가상환경 구축
+- [x] 프로젝트 폴더 구조 구성
+- [x] Python 가상환경 구축
+- [x] YOLO 라이브러리 설치 및 실행 테스트
 - [ ] YOLO Object Detection 학습
 - [ ] YOLO Segmentation 학습
 - [ ] 통행 조건 분석 기능 구현
