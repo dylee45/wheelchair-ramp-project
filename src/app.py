@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from src.map_view import show_ramp_map
 
 import streamlit as st
 from PIL import Image
@@ -75,6 +76,27 @@ if uploaded_file is not None:
         "경사각 (도)",
         placeholder="예: 3.5",
     )
+
+
+    
+    st.subheader("3. 경사로 위치 정보")
+
+    latitude = st.number_input(
+        "위도 (Latitude)",
+        min_value=-90.0,
+        max_value=90.0,
+        value=36.4800,
+        format="%.6f"
+    )
+
+    longitude = st.number_input(
+        "경도 (Longitude)",
+        min_value=-180.0,
+        max_value=180.0,
+        value=127.2890,
+        format="%.6f"
+    )
+
 
     if st.button("경사로 분석 시작"):
         try:
@@ -193,6 +215,15 @@ if uploaded_file is not None:
 
             for reason in analysis_result.reasons:
                 st.write(f"- {reason}")
+                
+                st.subheader("5. 경사로 위치 및 분석 결과")
+
+                show_ramp_map(
+                    latitude=latitude,
+                    longitude=longitude,
+                    status=analysis_result.status
+                    )
+
 
             st.caption(
                 "본 결과는 시범 분석이며 실제 휠체어 "
