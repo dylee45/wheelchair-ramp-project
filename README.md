@@ -77,9 +77,9 @@ wheelchair-ramp-project/
 - [x] 프로젝트 폴더 구조 구성
 - [x] Python 가상환경 구축
 - [x] YOLO 라이브러리 설치 및 실행 테스트
-- [ ] 공개 라벨링 데이터셋 확보
-- [ ] YOLO Object Detection 학습 및 테스트
-- [ ] YOLO Segmentation 학습
+- [x] 공개 라벨링 데이터셋 확보
+- [x] YOLO Object Detection 학습 및 테스트
+- [x] YOLO Segmentation 학습
 - [ ] 통행 조건 분석 기능 구현
 - [ ] UI 및 지도 연동
 - [ ] 전체 기능 통합 및 테스트
