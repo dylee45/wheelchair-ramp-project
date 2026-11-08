@@ -77,7 +77,8 @@ wheelchair-ramp-project/
 - [x] 프로젝트 폴더 구조 구성
 - [x] Python 가상환경 구축
 - [x] YOLO 라이브러리 설치 및 실행 테스트
-- [ ] YOLO Object Detection 학습
+- [ ] 공개 라벨링 데이터셋 확보
+- [ ] YOLO Object Detection 학습 및 테스트
 - [ ] YOLO Segmentation 학습
 - [ ] 통행 조건 분석 기능 구현
 - [ ] UI 및 지도 연동
@@ -88,3 +89,56 @@ wheelchair-ramp-project/
 사용자가 사진을 업로드하면 경사로와 주변 통행 환경을 분석하고, 해당 위치의 통행 가능 여부를 지도에 표시하는 프로그램을 구현한다.
 
 이를 통해 휠체어 이용자가 건물 접근 환경에 대한 정보를 쉽게 확인할 수 있도록 지원한다.
+
+
+
+## 9. 개발 환경 설정
+
+Python 가상환경 생성:
+
+```powershell
+python -m venv .venv
+```
+
+가상환경 활성화 (Windows PowerShell):
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+필요 라이브러리 설치:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+YOLO 모델 로딩 테스트:
+
+```powershell
+python src/detection.py
+```
+
+## 10. 학습 데이터셋
+
+본 프로젝트는 공개된 경사로 라벨링 데이터셋을
+활용하여 YOLO Object Detection 모델을 학습한다.
+
+- 데이터셋 출처: 추후 입력
+- 데이터셋 이름: 추후 입력
+- 데이터셋 라이선스: 추후 확인
+- 데이터 형식: YOLO Object Detection
+- 탐지 클래스: 데이터셋 확인 후 입력
+
+## 11. Object Detection 실행 방법
+
+학습:
+
+```powershell
+python src/train.py
+```
+
+추론:
+
+```powershell
+python src/detection.py
+```
