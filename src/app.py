@@ -1,6 +1,7 @@
 
 from pathlib import Path
 import sys
+import math
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -48,16 +49,10 @@ def load_models():
     if not SEGMENTATION_MODEL.exists():
         raise FileNotFoundError(SEGMENTATION_MODEL)
 
-    detection_model = YOLO(str(DETECTION_MODEL))
-    segmentation_model = YOLO(str(SEGMENTATION_MODEL))
-
-    # 최초 실행 시 사전 학습 모델 다운로드 가능
-    obstacle_model = YOLO(str(OBSTACLE_MODEL))
-
     return (
-        detection_model,
-        segmentation_model,
-        obstacle_model,
+        YOLO(str(DETECTION_MODEL)),
+        YOLO(str(SEGMENTATION_MODEL)),
+        YOLO(str(OBSTACLE_MODEL)),
     )
 
 
@@ -75,6 +70,94 @@ def has_class(result, names, targets):
     return False
 
 
+def parse_measurement(value, name):
+    if not value.strip():
+        return None
+
+    try:
+        number = float(value)
+    except ValueError:
+        raise ValueError(
+            f"{name}에는 숫자만 입력하세요."
+        )
+
+    if not math.isfinite(number):
+        raise ValueError(
+            f"{name}에는 유한한 숫자를 입력하세요."
+        )
+
+    return number
+
+
+def make_final_decision(
+    ramp_detected,
+    ramp_segmented,
+    width_cm,
+    slope_deg,
+    overlap_status,
+    obstacles,
+):
+    """
+    자동 장애물 분석을 반영한 시범 판정.
+
+    장애물이 탐지되지 않았다는 이유만으로
+    장애물이 없다고 확정하지 않는다.
+    """
+
+    # 기존 폭/경사각 및 모델 확인 로직 재사용
+    base_result = analyze_accessibility(
+        ramp_detected=ramp_detected,
+        ramp_segmented=ramp_segmented,
+        width_cm=width_cm,
+        slope_deg=slope_deg,
+        obstacle_detected=None,
+    )
+
+    reasons = [
+        reason
+        for reason in base_result.reasons
+        if reason != "장애물 여부를 확인하지 못했습니다."
+    ]
+
+    if overlap_status == "겹침 감지":
+        reasons.append(
+            "YOLO가 경사로 영역과 겹치는 "
+            "장애물 후보를 감지했습니다."
+        )
+
+    elif overlap_status == "겹침 미감지":
+        if obstacles:
+            reasons.append(
+                "장애물 후보는 탐지되었지만 "
+                "설정된 겹침 기준에는 해당하지 않았습니다."
+            )
+        else:
+            reasons.append(
+                "YOLO에서 설정된 장애물 후보가 "
+                "탐지되지 않았습니다."
+            )
+
+        reasons.append(
+            "장애물이 없다고 확정할 수는 없습니다."
+        )
+
+    else:
+        reasons.append(
+            "경사로 영역을 확인하지 못해 "
+            "장애물 겹침을 판단할 수 없습니다."
+        )
+
+    # 명확한 입력 조건 위반은 우선 반영
+    if base_result.status == "통행 불가":
+        status = "통행 불가"
+
+    # 자동 장애물 탐지만으로 안전을 확정하지 않음
+    else:
+        status = "판단 보류"
+
+    return status, reasons
+
+
 st.set_page_config(
     page_title="휠체어 경사로 분석",
     page_icon="♿",
@@ -85,12 +168,12 @@ st.title("♿ 휠체어 경사로 통행 분석")
 
 st.write(
     "YOLO Detection, Segmentation, 장애물 탐지를 "
-    "통합한 경사로 분석 프로그램입니다."
+    "통합하여 경사로의 상태를 분석합니다."
 )
 
 st.caption(
-    "시범 프로그램입니다. 사진 분석만으로 실제 "
-    "휠체어 통행 안전성을 보장하지 않습니다."
+    "현재는 시범 프로그램입니다. "
+    "자동 분석 결과는 실제 통행 안전성을 보장하지 않습니다."
 )
 
 
@@ -106,7 +189,9 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
+    image = Image.open(
+        uploaded_file
+    ).convert("RGB")
 
     st.image(
         image,
@@ -130,34 +215,23 @@ if uploaded_file is not None:
         placeholder="예: 3.5",
     )
 
+    st.caption(
+        "폭과 경사각은 직접 측정한 값을 입력합니다. "
+        "현재 테스트 기준은 폭 120cm 이상, "
+        "경사각 5도 이하입니다."
+    )
+
     # --------------------------------------------------
-    # 3. 장애물 정보
+    # 3. 장애물 자동 분석 안내
     # --------------------------------------------------
 
-    st.subheader("3. 장애물 정보")
+    st.subheader("3. 장애물 자동 분석")
 
     st.info(
-        "이번 단계부터 장애물 후보를 YOLO가 자동으로 "
-        "탐지합니다. 단, 최종 조건 판정에는 아직 "
-        "사용자가 확인한 장애물 정보를 사용합니다."
+        "장애물 후보는 YOLO가 자동으로 탐지합니다. "
+        "경사로 마스크와 장애물 박스의 겹침도 "
+        "자동으로 계산합니다."
     )
-
-    obstacle_choice = st.radio(
-        "실제 통행 영역에 장애물이 있나요?",
-        options=[
-            "확인하지 못함",
-            "장애물 없음",
-            "장애물 있음",
-        ],
-        horizontal=True,
-    )
-
-    if obstacle_choice == "장애물 있음":
-        obstacle_detected = True
-    elif obstacle_choice == "장애물 없음":
-        obstacle_detected = False
-    else:
-        obstacle_detected = None
 
     # --------------------------------------------------
     # 4. 위치 정보
@@ -182,7 +256,7 @@ if uploaded_file is not None:
     )
 
     st.caption(
-        "기본 좌표는 테스트용입니다. "
+        "기본 좌표는 테스트용 예시값입니다. "
         "실제 경사로 위치를 나타내지 않습니다."
     )
 
@@ -195,20 +269,18 @@ if uploaded_file is not None:
         type="primary",
     ):
         try:
-            width_cm = (
-                float(width_text)
-                if width_text.strip()
-                else None
+            width_cm = parse_measurement(
+                width_text, "경사로 폭"
             )
 
-            slope_deg = (
-                float(slope_text)
-                if slope_text.strip()
-                else None
+            slope_deg = parse_measurement(
+                slope_text, "경사각"
             )
 
             if width_cm is not None and width_cm <= 0:
-                st.error("폭은 0보다 커야 합니다.")
+                st.error(
+                    "경사로 폭은 0보다 커야 합니다."
+                )
                 st.stop()
 
             if slope_deg is not None and not (
@@ -219,7 +291,7 @@ if uploaded_file is not None:
                 )
                 st.stop()
 
-            with st.spinner("세 가지 YOLO 분석 실행 중..."):
+            with st.spinner("YOLO 자동 분석 중..."):
                 (
                     detection_model,
                     segmentation_model,
@@ -277,7 +349,7 @@ if uploaded_file is not None:
                     (image.height, image.width, 3),
                 )
 
-                # E. 장애물 겹침 분석
+                # E. 겹침 분석
                 overlap_status, overlap_results = (
                     analyze_obstacle_overlap(
                         ramp_mask,
@@ -291,26 +363,25 @@ if uploaded_file is not None:
                     overlap_results,
                 )
 
-                # F. 기존 통행 조건 판정
-                # 17단계에서는 자동 겹침 결과를
-                # 최종 판정에 반영하지 않는다.
-                analysis_result = analyze_accessibility(
+                # F. 자동 분석 기반 판정
+                status, reasons = make_final_decision(
                     ramp_detected=ramp_detected,
                     ramp_segmented=ramp_segmented,
                     width_cm=width_cm,
                     slope_deg=slope_deg,
-                    obstacle_detected=obstacle_detected,
+                    overlap_status=overlap_status,
+                    obstacles=obstacles,
                 )
 
             # G. 기록 저장
             save_history(
                 latitude,
                 longitude,
-                analysis_result.status,
-                analysis_result.reasons,
+                status,
+                reasons,
             )
 
-            # H. 화면 표시용 결과 저장
+            # H. 결과 화면 유지
             st.session_state["last_result"] = {
                 "detection_image": (
                     detection_result.plot()[:, :, ::-1].copy()
@@ -325,17 +396,16 @@ if uploaded_file is not None:
                 "obstacles": obstacles,
                 "overlap_status": overlap_status,
                 "overlap_results": overlap_results,
-                "status": analysis_result.status,
-                "reasons": analysis_result.reasons,
-                "obstacle_choice": obstacle_choice,
+                "status": status,
+                "reasons": reasons,
             }
 
-            st.success("전체 분석이 완료되었습니다.")
-
-        except ValueError:
-            st.error(
-                "폭과 경사각에는 숫자만 입력하세요."
+            st.success(
+                "자동 분석 결과가 저장되었습니다."
             )
+
+        except ValueError as error:
+            st.error(str(error))
 
         except FileNotFoundError as error:
             st.error(f"모델 파일 오류: {error}")
@@ -365,7 +435,8 @@ if "last_result" in st.session_state:
         )
 
         st.write(
-            f"경사로 탐지: {result['ramp_detected']}"
+            f"경사로 탐지: "
+            f"{result['ramp_detected']}"
         )
 
     with col2:
@@ -378,33 +449,35 @@ if "last_result" in st.session_state:
         )
 
         st.write(
-            f"경사로 분할: {result['ramp_segmented']}"
+            f"경사로 분할: "
+            f"{result['ramp_segmented']}"
         )
 
         st.write(
-            f"계단 탐지: {result['stairs_detected']}"
+            f"계단 탐지: "
+            f"{result['stairs_detected']}"
         )
 
     # --------------------------------------------------
     # 7. 장애물 분석 결과
     # --------------------------------------------------
 
-    st.subheader("6. 장애물 자동 탐지 결과")
+    st.subheader("6. 장애물 자동 분석 결과")
 
     st.image(
         result["overlap_image"],
         channels="RGB",
-        caption="경사로 영역 및 장애물 겹침 분석",
+        caption="경사로 및 장애물 겹침 분석",
         width="stretch",
     )
 
     st.write(
-        f"탐지된 장애물 후보: "
+        f"장애물 후보: "
         f"{len(result['obstacles'])}개"
     )
 
     st.write(
-        f"경사로와 장애물 겹침: "
+        f"겹침 분석: "
         f"**{result['overlap_status']}**"
     )
 
@@ -412,47 +485,43 @@ if "last_result" in st.session_state:
         for obstacle in result["overlap_results"]:
             st.write(
                 f"- {obstacle['class_name']} "
-                f"| 신뢰도: "
+                f"| 신뢰도 "
                 f"{obstacle['confidence']:.2f} "
-                f"| 겹침 비율: "
+                f"| 겹침 "
                 f"{obstacle['overlap_ratio']:.1%}"
             )
     else:
         st.info(
-            "겹침을 비교할 장애물 후보가 없습니다."
+            "표시할 장애물 겹침 상세 결과가 없습니다."
         )
-
-    st.caption(
-        "겹침은 이미지상 위치 관계를 의미하며, "
-        "실제 통행 차단 여부를 확정하지 않습니다."
-    )
 
     # --------------------------------------------------
     # 8. 최종 판정
     # --------------------------------------------------
 
-    st.subheader("7. 최종 통행 조건 판정")
+    st.subheader("7. 최종 분석 결과")
 
-    if result["status"] == "조건 충족":
-        st.success("✅ 입력된 테스트 조건 충족")
+    if result["status"] == "통행 불가":
+        st.error(
+            "❌ 입력된 테스트 조건 미충족"
+        )
 
-    elif result["status"] == "통행 불가":
-        st.error("❌ 설정 조건 미충족")
+    elif result["status"] == "조건 충족":
+        st.success(
+            "✅ 입력된 테스트 조건 충족"
+        )
 
     else:
-        st.warning("❓ 판단 보류")
-
-    st.write(
-        f"사용자 장애물 입력: "
-        f"{result['obstacle_choice']}"
-    )
+        st.warning(
+            "❓ 판단 보류 — 추가 확인 필요"
+        )
 
     for reason in result["reasons"]:
         st.write(f"- {reason}")
 
     st.caption(
-        "현재 최종 판정은 사용자 입력을 기반으로 합니다. "
-        "장애물 자동 분석은 별도 참고 결과입니다."
+        "장애물 자동 탐지 결과만으로 실제 통행 가능 "
+        "또는 불가능을 확정하지 않습니다."
     )
 
 
@@ -470,10 +539,13 @@ if latest_records:
 
     st.write(
         f"전체 분석 기록: {len(records)}개 / "
-        f"지도에 표시된 위치: {len(latest_records)}개"
+        f"지도에 표시된 위치: "
+        f"{len(latest_records)}개"
     )
 else:
-    st.info("저장된 경사로 기록이 없습니다.")
+    st.info(
+        "저장된 경사로 기록이 없습니다."
+    )
 
 
 # --------------------------------------------------
@@ -512,7 +584,10 @@ if records:
             st.success("기록을 삭제했습니다.")
             st.rerun()
         else:
-            st.error("기록을 찾지 못했습니다.")
-
+            st.error(
+                "삭제할 기록을 찾지 못했습니다."
+            )
 else:
-    st.info("삭제할 분석 기록이 없습니다.")
+    st.info(
+        "삭제할 분석 기록이 없습니다."
+    )
