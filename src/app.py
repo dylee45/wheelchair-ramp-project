@@ -1,3 +1,4 @@
+
 from pathlib import Path
 import sys
 import hashlib
@@ -80,30 +81,35 @@ st.set_page_config(
 st.title("♿ 경사로 자동 분석 시스템")
 
 st.write(
-    "사진을 업로드하면 YOLO를 이용하여 "
-    "경사로와 장애물 후보를 자동으로 분석합니다."
+    "사진을 업로드하면 YOLO가 경사로, "
+    "계단 및 장애물 후보를 자동 분석합니다."
 )
 
-st.warning(
-    "현재 프로그램은 시연용입니다. "
-    "사진만으로 실제 경사로 폭, 경사각 및 "
-    "휠체어 통행 안전성을 검증할 수 없습니다."
+st.caption(
+    "V는 시범 분석 조건 충족, "
+    "X는 장애물 겹침 의심, "
+    "?는 판단 보류를 의미합니다. "
+    "실제 통행 안전성을 보증하지 않습니다."
 )
 
 
-# ---------------------------------------------
+# ------------------------------------
 # 1. 사진 업로드
-# ---------------------------------------------
+# ------------------------------------
 
 st.subheader("1. 사진 업로드")
 
 uploaded_file = st.file_uploader(
-    "경사로 사진을 업로드하세요.",
+    "분석할 사진을 선택하세요.",
     type=["jpg", "jpeg", "png"],
 )
 
+image = None
+image_id = None
+
 if uploaded_file is not None:
     file_bytes = uploaded_file.getvalue()
+
     image_id = hashlib.sha256(
         file_bytes
     ).hexdigest()
@@ -121,10 +127,6 @@ if uploaded_file is not None:
         caption="업로드한 사진",
         width="stretch",
     )
-
-    # -----------------------------------------
-    # 2. 지도 위치
-    # -----------------------------------------
 
     st.subheader("2. 위치 정보")
 
@@ -145,13 +147,13 @@ if uploaded_file is not None:
     )
 
     st.caption(
-        "기본 좌표는 테스트용 예시입니다. "
+        "기본 좌표는 테스트용 예시이며 "
         "실제 경사로 위치가 아닙니다."
     )
 
-    # -----------------------------------------
-    # 3. 자동 분석
-    # -----------------------------------------
+    # ------------------------------------
+    # 3. YOLO 자동 분석
+    # ------------------------------------
 
     if st.button(
         "자동 분석 시작",
@@ -186,6 +188,11 @@ if uploaded_file is not None:
                     {"ramp", "ramps"},
                 )
 
+                stairs_detected = has_class(
+                    segmentation_result,
+                    {"stair", "stairs"},
+                )
+
                 ramp_mask = get_ramp_mask(
                     segmentation_result,
                     (image.height, image.width, 3),
@@ -195,21 +202,17 @@ if uploaded_file is not None:
                     ramp_mask is not None
                 )
 
-                stairs_detected = has_class(
-                    segmentation_result,
-                    {"stair", "stairs"},
-                )
-
                 _, obstacles = detect_obstacles(
                     image,
                     model=obstacle_model,
                 )
 
-                overlap_status, overlap_results = (
-                    analyze_obstacle_overlap(
-                        ramp_mask,
-                        obstacles,
-                    )
+                (
+                    overlap_status,
+                    overlap_results,
+                ) = analyze_obstacle_overlap(
+                    ramp_mask,
+                    obstacles,
                 )
 
                 visualization = create_visualization(
@@ -259,22 +262,24 @@ if uploaded_file is not None:
                 "reasons": analysis.reasons,
             }
 
-            st.success("자동 분석이 완료되었습니다.")
+            st.success(
+                "분석 결과가 지도에 저장되었습니다."
+            )
 
         except FileNotFoundError as error:
-            st.error(f"모델 파일이 없습니다: {error}")
+            st.error(f"모델 파일 오류: {error}")
 
         except Exception as error:
             st.error(f"분석 오류: {error}")
 
 
-# ---------------------------------------------
-# 4. 분석 결과 출력
-# ---------------------------------------------
+# ------------------------------------
+# 4. YOLO 결과
+# ------------------------------------
 
 result = st.session_state.get("last_result")
 
-if result is not None:
+if result is not None and image_id == result.get("image_id"):
     st.subheader("3. YOLO 분석 결과")
 
     col1, col2 = st.columns(2)
@@ -286,6 +291,10 @@ if result is not None:
             channels="RGB",
             width="stretch",
         )
+        st.write(
+            "경사로 탐지:",
+            result["ramp_detected"],
+        )
 
     with col2:
         st.write("**Segmentation**")
@@ -294,23 +303,16 @@ if result is not None:
             channels="RGB",
             width="stretch",
         )
+        st.write(
+            "경사로 영역:",
+            result["ramp_segmented"],
+        )
+        st.write(
+            "계단 후보:",
+            result["stairs_detected"],
+        )
 
-    st.write(
-        "경사로 Detection:",
-        result["ramp_detected"],
-    )
-
-    st.write(
-        "경사로 Segmentation:",
-        result["ramp_segmented"],
-    )
-
-    st.write(
-        "계단 후보:",
-        result["stairs_detected"],
-    )
-
-    st.subheader("4. 장애물 분석")
+    st.subheader("4. 장애물 자동 분석")
 
     st.image(
         result["visualization"],
@@ -319,36 +321,54 @@ if result is not None:
     )
 
     st.write(
-        f"장애물 후보 수: "
+        f"장애물 후보: "
         f"{len(result['obstacles'])}개"
     )
 
     st.write(
-        f"겹침 결과: "
+        f"겹침 분석: "
         f"{result['overlap_status']}"
     )
 
     for obstacle in result["overlap_results"]:
         st.write(
-            f"- {obstacle['class_name']}: "
-            f"겹침 비율 "
+            f"- {obstacle['class_name']} "
+            f"| 신뢰도: "
+            f"{obstacle['confidence']:.2f} "
+            f"| 겹침 비율: "
             f"{obstacle['overlap_ratio']:.1%}"
         )
 
+    # ------------------------------------
+    # 5. 최종 판정
+    # ------------------------------------
+
     st.subheader("5. 최종 판정")
 
-    st.warning(
-        f"❓ {result['status']} "
-        "— 실제 통행 조건 추가 확인 필요"
-    )
+    status = result["status"]
+
+    if status == "조건 충족":
+        st.success(
+            "✅ V — 시범 분석 조건 충족"
+        )
+
+    elif status == "장애물 겹침 의심":
+        st.error(
+            "❌ X — 장애물 겹침 의심"
+        )
+
+    else:
+        st.warning(
+            "❓ 판단 보류 — 추가 확인 필요"
+        )
 
     for reason in result["reasons"]:
         st.write(f"- {reason}")
 
 
-# ---------------------------------------------
-# 5. 지도 및 기록
-# ---------------------------------------------
+# ------------------------------------
+# 6. 지도
+# ------------------------------------
 
 st.subheader("6. 경사로 지도")
 
@@ -358,10 +378,14 @@ latest_records = get_latest_records(records)
 if latest_records:
     show_ramp_map(records)
 else:
-    st.info("저장된 분석 기록이 없습니다.")
+    st.info("저장된 경사로 기록이 없습니다.")
 
 
-st.subheader("7. 분석 기록")
+# ------------------------------------
+# 7. 기록 관리
+# ------------------------------------
+
+st.subheader("7. 분석 기록 관리")
 
 if records:
     st.dataframe(
@@ -372,22 +396,26 @@ if records:
 
     options = {
         (
-            f"{r['date']} | "
-            f"{r['latitude']}, {r['longitude']} "
-            f"| {r['id'][:8]}"
-        ): r["id"]
-        for r in records
+            f"{record['date']} | "
+            f"{record['latitude']}, "
+            f"{record['longitude']} | "
+            f"{record['status']} | "
+            f"{record['id'][:8]}"
+        ): record["id"]
+        for record in records
     }
 
     selected = st.selectbox(
-        "삭제할 기록",
-        list(options.keys()),
+        "삭제할 분석 기록",
+        options=list(options.keys()),
     )
 
-    if st.button("기록 삭제"):
+    if st.button("선택한 기록 삭제"):
         if delete_history(options[selected]):
+            st.success("기록이 삭제되었습니다.")
             st.rerun()
         else:
             st.error("기록 삭제에 실패했습니다.")
+
 else:
     st.info("분석 기록이 없습니다.")
