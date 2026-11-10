@@ -1,11 +1,4 @@
-
 from dataclasses import dataclass
-
-
-# 프로그램 시연을 위한 임시 기준
-# 실제 법적 접근성 기준이 아님
-MIN_WIDTH_CM = 120.0
-MAX_SLOPE_DEG = 5.0
 
 
 @dataclass
@@ -17,112 +10,71 @@ class AnalysisResult:
 def analyze_accessibility(
     ramp_detected: bool,
     ramp_segmented: bool,
-    width_cm: float | None,
-    slope_deg: float | None,
-    obstacle_detected: bool | None = None,
+    overlap_status: str,
+    stairs_detected: bool = False,
 ) -> AnalysisResult:
+    """
+    사진 기반 자동 분석 결과를 종합한다.
+
+    주의:
+    - 실제 폭(cm)과 경사각(도)은 측정하지 않는다.
+    - 장애물 겹침은 통행 차단의 확정 증거가 아니다.
+    - 실제 통행 가능 여부는 별도 검증이 필요하다.
+    """
 
     reasons = []
-    blocked = False
-    unknown = False
 
-    # 1. Object Detection 결과
     if ramp_detected:
         reasons.append(
-            "Object Detection에서 경사로가 탐지되었습니다."
+            "Object Detection에서 경사로 후보를 탐지했습니다."
         )
     else:
         reasons.append(
             "Object Detection에서 경사로를 확인하지 못했습니다."
         )
-        unknown = True
 
-    # 2. Segmentation 결과
     if ramp_segmented:
         reasons.append(
-            "Segmentation에서 경사로 영역이 확인되었습니다."
+            "Segmentation에서 경사로 영역을 추출했습니다."
         )
     else:
         reasons.append(
             "Segmentation에서 경사로 영역을 확인하지 못했습니다."
         )
-        unknown = True
 
-    # 3. 경사로 폭 확인
-    if width_cm is None:
+    if stairs_detected:
         reasons.append(
-            "경사로 폭 정보가 입력되지 않았습니다."
+            "계단 후보가 탐지되었습니다. "
+            "경사로와의 위치 관계를 추가로 확인해야 합니다."
         )
-        unknown = True
 
-    elif width_cm < MIN_WIDTH_CM:
+    if overlap_status == "겹침 감지":
         reasons.append(
-            f"입력된 폭 {width_cm:g}cm는 "
-            f"테스트 기준 {MIN_WIDTH_CM:g}cm보다 좁습니다."
+            "경사로 영역과 장애물 후보의 겹침이 감지되었습니다."
         )
-        blocked = True
+        reasons.append(
+            "실제 통행을 방해하는지는 추가 확인이 필요합니다."
+        )
+
+    elif overlap_status == "겹침 미감지":
+        reasons.append(
+            "설정된 기준에서 장애물 후보의 겹침이 감지되지 않았습니다."
+        )
+        reasons.append(
+            "탐지되지 않은 장애물이 존재할 수 있습니다."
+        )
 
     else:
         reasons.append(
-            f"입력된 폭 {width_cm:g}cm는 "
-            "테스트 기준을 충족합니다."
+            "경사로와 장애물의 겹침을 판단할 수 없습니다."
         )
 
-    # 4. 경사각 확인
-    if slope_deg is None:
-        reasons.append(
-            "경사각 정보가 입력되지 않았습니다."
-        )
-        unknown = True
-
-    elif slope_deg > MAX_SLOPE_DEG:
-        reasons.append(
-            f"입력된 경사각 {slope_deg:g}도는 "
-            f"테스트 기준 {MAX_SLOPE_DEG:g}도를 초과합니다."
-        )
-        blocked = True
-
-    else:
-        reasons.append(
-            f"입력된 경사각 {slope_deg:g}도는 "
-            "테스트 기준을 충족합니다."
-        )
-
-    # 5. 장애물 여부 확인
-    if obstacle_detected is None:
-        reasons.append(
-            "장애물 여부가 확인되지 않았습니다."
-        )
-        unknown = True
-
-    elif obstacle_detected:
-        reasons.append(
-            "사용자가 통행 영역에 장애물이 있다고 입력했습니다."
-        )
-        blocked = True
-
-    else:
-        reasons.append(
-            "사용자가 통행 영역에 장애물이 없다고 입력했습니다."
-        )
-
-    # 6. 최종 판정
-    # 명확히 입력된 조건 위반이 있으면 통행 불가
-    if blocked:
-        status = "통행 불가"
-
-    # 정보가 부족하거나 모델이 확인하지 못하면 판단 보류
-    elif unknown:
-        status = "판단 보류"
-
-    # 모든 조건을 충족한 경우
-    else:
-        status = "조건 충족"
-        reasons.append(
-            "입력된 모든 시범 테스트 조건을 충족했습니다."
-        )
+    reasons.append(
+        "사진만으로 실제 경사로 폭과 경사각을 "
+        "검증하지 못했습니다."
+    )
 
     return AnalysisResult(
-        status=status,
-        reasons=reasons
+        status="판단 보류",
+        reasons=reasons,
     )
